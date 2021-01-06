@@ -8,10 +8,12 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -111,6 +113,7 @@ func printResults(results map[int]*Result, startTime time.Time) {
 	}
 
 	fmt.Println()
+	fmt.Println(time.Now().Format("2006-01-02 15:04:05.000"))
 	fmt.Printf("Requests:                       %10d hits\n", requests)
 	fmt.Printf("Successful requests:            %10d hits\n", success)
 	fmt.Printf("Network failed:                 %10d hits\n", networkFailed)
@@ -206,7 +209,7 @@ func NewConfiguration() *Configuration {
 		fileLines, err := readLines(urlsFilePath)
 
 		if err != nil {
-			log.Fatalf("Error in ioutil.ReadFile for file: %s Error: ", urlsFilePath, err)
+			log.Fatalf("Error in ioutil.ReadFile for file: %s Error: %s ", urlsFilePath, err)
 		}
 
 		configuration.urls = fileLines
@@ -222,7 +225,7 @@ func NewConfiguration() *Configuration {
 		data, err := ioutil.ReadFile(postDataFilePath)
 
 		if err != nil {
-			log.Fatalf("Error in ioutil.ReadFile for file path: %s Error: ", postDataFilePath, err)
+			log.Fatalf("Error in ioutil.ReadFile for file path: %s Error: %s", postDataFilePath, err)
 		}
 
 		configuration.postData = data
@@ -252,43 +255,46 @@ func MyDialer() func(address string) (conn net.Conn, err error) {
 
 func client(configuration *Configuration, result *Result, done *sync.WaitGroup) {
 	for result.requests < configuration.requests {
-		for _, tmpUrl := range configuration.urls {
+		// for _, tmpUrl := range configuration.urls {
+		idx := rand.Intn(len(configuration.urls))
+		tmpUrl := strings.TrimSpace(configuration.urls[idx])
+		// log.Printf("url:%s \n", tmpUrl)
+		req := fasthttp.AcquireRequest()
 
-			req := fasthttp.AcquireRequest()
+		req.SetRequestURI(tmpUrl)
+		req.Header.SetMethodBytes([]byte(configuration.method))
 
-			req.SetRequestURI(tmpUrl)
-			req.Header.SetMethodBytes([]byte(configuration.method))
-
-			if configuration.keepAlive == true {
-				req.Header.Set("Connection", "keep-alive")
-			} else {
-				req.Header.Set("Connection", "close")
-			}
-
-			if len(configuration.authHeader) > 0 {
-				req.Header.Set("Authorization", configuration.authHeader)
-			}
-
-			req.SetBody(configuration.postData)
-
-			resp := fasthttp.AcquireResponse()
-			err := configuration.myClient.Do(req, resp)
-			statusCode := resp.StatusCode()
-			result.requests++
-			fasthttp.ReleaseRequest(req)
-			fasthttp.ReleaseResponse(resp)
-
-			if err != nil {
-				result.networkFailed++
-				continue
-			}
-
-			if statusCode == fasthttp.StatusOK {
-				result.success++
-			} else {
-				result.badFailed++
-			}
+		if configuration.keepAlive == true {
+			req.Header.Set("Connection", "keep-alive")
+		} else {
+			req.Header.Set("Connection", "close")
 		}
+
+		if len(configuration.authHeader) > 0 {
+			req.Header.Set("Authorization", configuration.authHeader)
+		}
+
+		req.SetBody(configuration.postData)
+
+		resp := fasthttp.AcquireResponse()
+		err := configuration.myClient.Do(req, resp)
+		statusCode := resp.StatusCode()
+		result.requests++
+		fasthttp.ReleaseRequest(req)
+		fasthttp.ReleaseResponse(resp)
+
+		if err != nil {
+			result.networkFailed++
+			continue
+		}
+
+		if statusCode == fasthttp.StatusOK {
+			result.success++
+		} else {
+			fmt.Printf("url:%s, status:%d\n", tmpUrl, statusCode)
+			result.badFailed++
+		}
+		//}
 	}
 
 	done.Done()
